@@ -6,7 +6,7 @@ import threading
 import numpy as np
 
 SAMPLE_RATE = 44100
-BLOCK_SIZE = 2048
+BLOCK_SIZE = 1024
 MIN_FREQ = 75.0
 MAX_FREQ = 1200.0
 RMS_THRESHOLD = 0.008
@@ -84,12 +84,13 @@ def list_audio_devices() -> list[tuple[int, str]]:
 
 
 class AudioPitchDetector:
-    def __init__(self):
+    def __init__(self, monitor: bool = False):
         self.queue: queue.Queue = queue.Queue()
         self._thread: threading.Thread | None = None
         self._running = False
         self._last_note = -1
         self._silent = 0
+        self.monitor = monitor
 
     def start(self, device: int | None = None):
         if self._running:
@@ -112,26 +113,32 @@ class AudioPitchDetector:
             except Exception:
                 sr = SAMPLE_RATE
 
-            stream = sd.InputStream(
-                device=device,
+            dev = (device, None) if self.monitor else device
+
+            def callback(indata, outdata, frames, _time, status):
+                if status:
+                    return
+                if self.monitor:
+                    outdata[:] = indata * 0.6
+                note, cents, rms = detect_pitch(indata.flatten(), sr)
+                if note >= 0:
+                    if note != self._last_note or self._silent > SILENCE_FRAMES_RESET:
+                        self.queue.put(("note", note, cents))
+                        self._last_note = note
+                        self._silent = 0
+                else:
+                    self._silent += 1
+                    if self._silent > SILENCE_FRAMES_RESET * 3:
+                        self._last_note = -1
+
+            with sd.Stream(
+                device=dev,
                 channels=1,
                 samplerate=sr,
                 blocksize=BLOCK_SIZE,
-            )
-            with stream:
+                callback=callback,
+            ):
                 while self._running:
-                    block, _ = stream.read(BLOCK_SIZE)
-                    block = block.flatten()
-                    note, cents, rms = detect_pitch(block, sr)
-
-                    if note >= 0:
-                        if note != self._last_note or self._silent > SILENCE_FRAMES_RESET:
-                            self.queue.put(("note", note, cents))
-                            self._last_note = note
-                            self._silent = 0
-                    else:
-                        self._silent += 1
-                        if self._silent > SILENCE_FRAMES_RESET * 3:
-                            self._last_note = -1
+                    sd.sleep(100)
         except Exception as e:
             print(f"\n  Audio input error: {e}")

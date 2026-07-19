@@ -16,6 +16,7 @@ from src.sound_engine import SoundEngine
 from src.audio_input import AudioPitchDetector
 
 LANE_KEYS = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6]
+SLIDE_THRESHOLD = 150.0
 
 
 class Game:
@@ -64,12 +65,13 @@ class Game:
         self.renderer = renderer or Renderer(self.screen)
 
         self.sound = sound or SoundEngine()
-        if self.sound.enabled and tiles:
+        if self.sound.enabled and tiles and not self._is_audio:
             frets = {t.fret for t in tiles}
             if frets:
                 self.sound.preload_range(min(frets), max(frets))
 
         self.note_queue: queue.Queue = queue.Queue()
+        self._is_audio = input_cfg.get("type") == "audio" if input_cfg else False
         self._setup_input(input_cfg or {})
 
     def _setup_input(self, cfg: dict):
@@ -89,7 +91,7 @@ class Game:
             device = cfg.get("device")
             name = cfg.get("name", f"device {device}")
             self.input_label = f"Audio: {name}"
-            self._audio = AudioPitchDetector()
+            self._audio = AudioPitchDetector(monitor=True)
             self._audio.queue = self.note_queue
             self._audio.start(device)
             self.input_active = True
@@ -244,11 +246,31 @@ class Game:
         else:
             tile.hit_rating = "ok"
             self.score += SCORE_OK * mult
-        self.sound.play_note(tile.fret)
+        if not self._is_audio:
+            self.sound.play_note(tile.fret)
         self.rating_text = tile.hit_rating
         self.rating_timer = 30
         tile.flash_timer = 10
         self.lane_flash[tile.lane] = 8
+
+        self._auto_slide(tile)
+
+    def _auto_slide(self, hit_tile: Tile):
+        for tile in self.tiles:
+            if not tile.active:
+                continue
+            dt = abs(tile.spawn_time - hit_tile.spawn_time)
+            if dt > SLIDE_THRESHOLD or dt < 0.5:
+                continue
+            dl = abs(tile.lane - hit_tile.lane)
+            if dl > 2:
+                continue
+            tile.hit = True
+            tile.y = TARGET_Y
+            tile.hit_rating = "slide"
+            self.hit_count += 1
+            if not self._is_audio:
+                self.sound.play_note(tile.fret)
 
     def _check_misses(self):
         for tile in self.tiles:

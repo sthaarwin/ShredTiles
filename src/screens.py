@@ -287,7 +287,7 @@ class TunerScreen:
             self._error = "No audio input devices found"
             return
 
-        self.audio = AudioPitchDetector()
+        self.audio = AudioPitchDetector(monitor=True)
         self._queue = self.audio.queue
 
         try:

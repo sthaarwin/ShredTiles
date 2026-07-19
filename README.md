@@ -6,8 +6,11 @@ A Piano Tiles–style rhythm game that turns your real guitar into a game contro
 
 - **MIDI input** — plug in a USB MIDI interface and play notes to hit tiles
 - **Audio pitch detection** — use a microphone; autocorrelation + parabolic interpolation for accurate note tracking
+- **Audio monitoring** — hear your guitar through speakers/headphones in real-time while playing (full-duplex callback stream, low latency)
 - **Built-in chromatic tuner** — tune your guitar before playing, with visual cents meter
 - **Track/channel selection** — pick which MIDI track and channel to play
+- **Tile deduplication** — same-lane notes within 100ms are merged so strummed chords don't break your combo
+- **Slide auto-hit** — nearby notes on adjacent lanes auto-register when you hit a note, simulating legato/slides
 - **3-2-1-GO countdown** before gameplay starts
 - **Pause / Resume** — press `ESC` during gameplay
 - **Restart** — press `R` while paused to replay the same track
@@ -28,7 +31,13 @@ A Piano Tiles–style rhythm game that turns your real guitar into a game contro
 
 ## MIDI / Audio input
 
-MIDI notes map to lanes as `(note - 40) % 6`. Audio pitch detection uses autocorrelation on 2048-sample blocks at the device's default sample rate.
+MIDI notes map to lanes as `(note - 40) % 6`. Audio pitch detection uses autocorrelation with parabolic interpolation on 1024-sample blocks. When using audio input mode, the game plays your guitar through your speakers in real-time via a callback-based full-duplex stream with 60% monitor gain — no synthetic tones, just your instrument.
+
+### Tips for audio input
+
+- Use **headphones** to avoid feedback between speakers and microphone
+- Keep your guitar close to the mic and adjust system input volume so the level is clear but not clipping
+- The tuner screen also uses audio monitoring — tune while hearing yourself
 
 ## Requirements
 

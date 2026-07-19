@@ -224,4 +224,14 @@ def parse_midi_tracks(mid: mido.MidiFile, track_index: int, filter_channel: int 
             lane = (msg.note - 40) % 6
             tiles.append(Tile(lane=lane, fret=msg.note, spawn_time=time_ms, channel=getattr(msg, "channel", 0)))
 
-    return tiles
+    tiles.sort(key=lambda t: t.spawn_time)
+
+    kept: list[Tile] = []
+    last_time: dict[int, float] = {}
+    for t in tiles:
+        prev = last_time.get(t.lane, -1e9)
+        if t.spawn_time - prev >= 100.0:
+            kept.append(t)
+            last_time[t.lane] = t.spawn_time
+
+    return kept
