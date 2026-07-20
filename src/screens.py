@@ -272,6 +272,9 @@ class TunerScreen:
         self.audio = None
         self._queue = None
         self._error = ""
+        self._cents = 0.0
+        self._smooth_cents = 0.0
+        self._signal = 0.0
 
     def enter(self):
         from src.audio_input import AudioPitchDetector, list_audio_devices
@@ -280,6 +283,8 @@ class TunerScreen:
         self.detected_freq = 0.0
         self.rms = 0.0
         self._cents = 0.0
+        self._smooth_cents = 0.0
+        self._signal = 0.0
         self._error = ""
 
         devices = list_audio_devices()
@@ -329,10 +334,14 @@ class TunerScreen:
                     self.detected_note = data
                     self._cents = cents
                     self.detected_freq = 440.0 * (2.0 ** ((data - 69) / 12.0))
+                    self._signal = 1.0
         except Exception:
             pass
         if self.detected_note < 0:
             self.detected_freq = 0.0
+            self._signal *= 0.9
+        else:
+            self._smooth_cents = self._smooth_cents * 0.7 + self._cents * 0.3
 
     def _nearest_string(self, note: int):
         best = None
@@ -353,80 +362,107 @@ class TunerScreen:
         title = r._render_text(r.font_large, "GUITAR TUNER", ACCENT_COLOR)
         r.screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 60))
 
-        # Draw string indicators
-        string_y = 160
+        # Signal strength bar
+        bar_y = 100
+        bar_w = 200
+        bar_h = 8
+        bx = SCREEN_WIDTH // 2 - bar_w // 2
+        pygame.draw.rect(r.screen, (30, 30, 45), (bx, bar_y, bar_w, bar_h), border_radius=4)
+        sig_w = int(bar_w * min(self._signal, 1.0))
+        sig_c = (100, 255, 100) if self._signal > 0.3 else (255, 200, 80) if self._signal > 0.1 else (80, 80, 80)
+        if sig_w > 0:
+            pygame.draw.rect(r.screen, sig_c, (bx, bar_y, sig_w, bar_h), border_radius=4)
+
+        # String indicators
+        string_y = 130
+        box_h = 66
         for s in range(6, 0, -1):
             xn = (6 - s) * (SCREEN_WIDTH // 6)
             xw = SCREEN_WIDTH // 6
             target = STANDARD_TUNING[s]
-            rect = pygame.Rect(xn, string_y, xw, 60)
 
             match = self.detected_note >= 0 and self._nearest_string(self.detected_note)[0] == s
-            color = LANE_COLORS[6 - s] if match else (40, 40, 60)
-            if match:
-                pygame.draw.rect(r.screen, color, rect, border_radius=6)
-                pygame.draw.rect(r.screen, tuple(min(255, c + 60) for c in color), rect, 2, border_radius=6)
-            else:
-                pygame.draw.rect(r.screen, color, rect, border_radius=6)
-                pygame.draw.rect(r.screen, (60, 60, 80), rect, 2, border_radius=6)
+            color = LANE_COLORS[6 - s] if match else (35, 35, 55)
+            bright = tuple(min(255, c + 60) for c in color)
 
-            name = r._render_text(r.font_huge, STRING_NAMES[s], (255, 255, 255) if match else (120, 120, 140))
-            r.screen.blit(name, (xn + xw // 2 - name.get_width() // 2, string_y + 8))
+            rect = pygame.Rect(xn + 2, string_y, xw - 4, box_h)
+            pygame.draw.rect(r.screen, color, rect, border_radius=6)
+            pygame.draw.rect(r.screen, bright if match else (55, 55, 75), rect, 2, border_radius=6)
 
-            tn = r._render_text(r.font_small, midi_to_name(target), (150, 150, 160))
-            r.screen.blit(tn, (xn + xw // 2 - tn.get_width() // 2, string_y + 36))
+            name = r._render_text(r.font_large, STRING_NAMES[s], (255, 255, 255) if match else (110, 110, 130))
+            r.screen.blit(name, (xn + xw // 2 - name.get_width() // 2, string_y + 4))
 
-        # Detected note display
+            tn = r._render_text(r.font_small, midi_to_name(target), (180, 180, 190) if match else (120, 120, 140))
+            r.screen.blit(tn, (xn + xw // 2 - tn.get_width() // 2, string_y + 42))
+
         if self.detected_note >= 0:
-            ny = 320
+            ny = 220
+
             note_name = midi_to_name(self.detected_note)
+            s, target_note = self._nearest_string(self.detected_note)
+            cents = self._smooth_cents
+
             note_surf = r._render_text(r.font_huge, note_name, ACCENT_COLOR)
             r.screen.blit(note_surf, (SCREEN_WIDTH // 2 - note_surf.get_width() // 2, ny))
 
-            freq_surf = r._render_text(r.font_small, f"{self.detected_freq:.1f} Hz", UI_TEXT_COLOR)
-            r.screen.blit(freq_surf, (SCREEN_WIDTH // 2 - freq_surf.get_width() // 2, ny + 70))
+            str_surf = r._render_text(r.font_med, f"String {s}  \u2192  {STRING_NAMES[s]}", UI_TEXT_COLOR)
+            r.screen.blit(str_surf, (SCREEN_WIDTH // 2 - str_surf.get_width() // 2, ny + 66))
 
-            # Nearest string + cents
-            s, target_note = self._nearest_string(self.detected_note)
-            cents = 1200 * math.log2(self.detected_freq / (440.0 * (2.0 ** ((target_note - 69) / 12.0))))
-            if hasattr(self, "_cents") and self._cents is not None:
-                cents = self._cents
-
-            str_surf = r._render_text(r.font_med, f"String {s} ({STRING_NAMES[s]})", UI_TEXT_COLOR)
-            r.screen.blit(str_surf, (SCREEN_WIDTH // 2 - str_surf.get_width() // 2, ny + 100))
-
-            # Cents meter
-            meter_y = ny + 140
-            meter_w = 300
-            meter_h = 20
+            # Needle meter
+            meter_y = ny + 100
+            meter_w = 320
+            meter_h = 50
+            needle_y = meter_y + meter_h // 2
             cx = SCREEN_WIDTH // 2
-            pygame.draw.rect(r.screen, (40, 40, 60), (cx - meter_w // 2, meter_y, meter_w, meter_h), border_radius=4)
-            pygame.draw.line(r.screen, (80, 80, 100), (cx, meter_y), (cx, meter_y + meter_h), 2)
 
-            if abs(cents) < 50:
-                bar_w = int((50 - abs(cents)) / 50 * (meter_w // 2))
-                bar_color = GOOD_COLOR if abs(cents) < 15 else OK_COLOR
-                if cents < 0:
-                    bar_x = cx - bar_w
-                else:
-                    bar_x = cx
-                pygame.draw.rect(r.screen, bar_color, (bar_x, meter_y + 2, bar_w, meter_h - 4), border_radius=3)
+            pygame.draw.rect(r.screen, (25, 25, 40), (cx - meter_w // 2, meter_y, meter_w, meter_h), border_radius=8)
+            pygame.draw.rect(r.screen, (50, 50, 70), (cx - meter_w // 2, meter_y, meter_w, meter_h), 1, border_radius=8)
 
-            cents_str = r._render_text(r.font_small, f"{cents:+.1f} cents", UI_TEXT_COLOR)
-            r.screen.blit(cents_str, (SCREEN_WIDTH // 2 - cents_str.get_width() // 2, meter_y + meter_h + 10))
+            flat_lbl = r._render_text(r.font_small, "Flat", (120, 120, 140))
+            r.screen.blit(flat_lbl, (cx - meter_w // 2 + 8, meter_y + 16))
+            sharp_lbl = r._render_text(r.font_small, "Sharp", (120, 120, 140))
+            r.screen.blit(sharp_lbl, (cx + meter_w // 2 - sharp_lbl.get_width() - 8, meter_y + 16))
 
-            # Tuning status
+            pygame.draw.line(r.screen, (80, 80, 100), (cx, needle_y - 14), (cx, needle_y + 14), 2)
+
+            for tick_cents in range(-50, 51, 10):
+                if tick_cents == 0:
+                    continue
+                frac = tick_cents / 50.0
+                tx = cx + int(frac * (meter_w // 2 - 16))
+                h = 4 if tick_cents % 20 == 0 else 2
+                pygame.draw.line(r.screen, (60, 60, 80), (tx, needle_y - 6), (tx, needle_y + 6), 1)
+
+            clamped = max(-50, min(50, cents))
+            frac = clamped / 50.0
+            nx = cx + int(frac * (meter_w // 2 - 16))
+
+            tri = [(nx, meter_y + 4), (nx, meter_y + meter_h - 4),
+                   (nx + (6 if cents >= 0 else -6), needle_y)]
+            n_color = GOOD_COLOR if abs(cents) < 15 else OK_COLOR if abs(cents) < 50 else MISS_COLOR
+            pygame.draw.polygon(r.screen, n_color, tri)
+
+            if abs(cents) >= 5:
+                arrow = ">" if cents > 0 else "<"
+                a_color = OK_COLOR if cents > 0 else (200, 180, 100)
+                arr_surf = r._render_text(r.font_huge, arrow, a_color)
+                ax = cx + meter_w // 2 - arr_surf.get_width() - 10 if cents > 0 else cx - meter_w // 2 + 10
+                r.screen.blit(arr_surf, (ax, needle_y - arr_surf.get_height() // 2))
+
+            cents_str = r._render_text(r.font_med, f"{cents:+.1f} cent", n_color)
+            r.screen.blit(cents_str, (SCREEN_WIDTH // 2 - cents_str.get_width() // 2, meter_y + meter_h + 8))
+
             if abs(cents) < 15:
                 status = "IN TUNE"
                 sc = GOOD_COLOR
             elif abs(cents) < 50:
-                status = "SLIGHTLY OFF"
+                status = "TUNE ME"
                 sc = OK_COLOR
             else:
-                status = "OUT OF TUNE"
+                status = "OUT OF RANGE"
                 sc = MISS_COLOR
             st = r._render_text(r.font_large, status, sc)
-            r.screen.blit(st, (SCREEN_WIDTH // 2 - st.get_width() // 2, meter_y + 50))
+            r.screen.blit(st, (SCREEN_WIDTH // 2 - st.get_width() // 2, meter_y + 72))
 
         elif self._error:
             err = r._render_text(r.font_small, self._error, MISS_COLOR)

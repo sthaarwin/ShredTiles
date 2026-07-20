@@ -113,13 +113,7 @@ class AudioPitchDetector:
             except Exception:
                 sr = SAMPLE_RATE
 
-            dev = (device, None) if self.monitor else device
-
-            def callback(indata, outdata, frames, _time, status):
-                if status:
-                    return
-                if self.monitor:
-                    outdata[:] = indata * 0.6
+            def _process(indata):
                 note, cents, rms = detect_pitch(indata.flatten(), sr)
                 if note >= 0:
                     if note != self._last_note or self._silent > SILENCE_FRAMES_RESET:
@@ -131,7 +125,21 @@ class AudioPitchDetector:
                     if self._silent > SILENCE_FRAMES_RESET * 3:
                         self._last_note = -1
 
-            with sd.Stream(
+            if self.monitor:
+                def callback(indata, outdata, frames, _time, status):
+                    if not status:
+                        outdata[:] = indata * 0.6
+                        _process(indata)
+                dev = (device, None)
+                stream_cls = sd.Stream
+            else:
+                def callback(indata, frames, _time, status):
+                    if not status:
+                        _process(indata)
+                dev = device
+                stream_cls = sd.InputStream
+
+            with stream_cls(
                 device=dev,
                 channels=1,
                 samplerate=sr,
